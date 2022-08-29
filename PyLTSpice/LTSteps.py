@@ -83,9 +83,10 @@ import math
 import re
 import os
 import sys
-from collections import OrderedDict
+from collections import OrderedDict, UserDict
 from typing import Union, Iterable, List
 from PyLTSpice.detect_encoding import detect_encoding
+from dataclasses import dataclass
 
 if __name__ == "__main__":
     def message(*strs):
@@ -222,6 +223,57 @@ def reformat_LTSpice_export(export_file: str, tabular_file: str):
     fout.close()
 
 
+@dataclass(frozen=True)
+class FourierKey:
+    waveform: str
+    frequency: float
+    n_harmonics: int
+    n_periods: int
+
+
+@dataclass
+class FourierHarmonic:
+    harmonic_number: int
+    frequency: int
+    fourier_component: int
+    normalized_component: int
+    phase: int
+    normalized_phase: int
+
+    @classmethod
+    def from_lt_spice(cls, lt_spice_str: str):
+        """
+        Parses string from LTSpice and make Fourier Harmonic object
+        :param lt_spice_str:
+        :return: cls
+        """
+        split_str = lt_spice_str.strip().replace("°", "").split("\t")
+        harmonic = int(split_str[0])
+        frequency, fourier_component, normalized_component, phase, normalized_phase = [float(x) for x in split_str[1:]]
+
+        return cls(harmonic, frequency, fourier_component, normalized_component, phase, normalized_phase)
+
+
+@dataclass
+class FourierAnalysis:
+    dc_component: float
+    thd: float
+    thd_alt: float
+    harmonics: List[FourierHarmonic]
+
+    @property
+    def frequency(self):
+        return self.harmonics[0].frequency
+
+    @property
+    def n_harmonics(self):
+        return len(self.harmonics)
+
+
+class FourierResults(UserDict):
+    pass
+
+
 class LTSpiceExport(object):
     """
     Opens and reads LTSpice export data when using the "Export data as text" in the File Menu on the waveform window.
@@ -325,6 +377,7 @@ class LTSpiceLogReader(object):
         # Changes in step_set would be propagated to object on the call
         self.dataset = OrderedDict()  # Dictionary in which the order of the keys is kept
         self.measure_count = 0
+        self.fourier: List[FourierResults] = []
 
         # Preparing a stepless measurement read regular expression
         regx = re.compile(
@@ -337,7 +390,12 @@ class LTSpiceLogReader(object):
 
             while line:
                 if line.startswith("N-Period"):
-                    import pandas as pd
+                    # If we have yet to record any fourier data we need to create our first FourierResults,
+                    # additional FourierResults objects will be created when new steps are encountered
+                    # This will not work if some steps have fourier analysis and other do not, but I don't think this is
+                    # possible.
+                    if not self.fourier:
+                        self.fourier.append(FourierResults())
                     # Read number of periods
                     n_periods = int(line.strip('\r\n').split("=")[-1])
                     # Read waveform name
@@ -352,65 +410,29 @@ class LTSpiceLogReader(object):
                     fin.readline()
                     fin.readline()
 
+                    # Read all the harmonic lines
                     harmonic_lines = []
                     while True:
                         line = fin.readline().strip('\r\n')
                         if line.startswith("Total Harmonic"):
                             # Find THD
-                            thd = float(re.search(r"\d+.\d+", line).group())
+                            thds = re.findall(r"\d+.\d+", line)
+                            thd = float(thds[0])
+                            thd_alt = float(thds[1])
                             break
                         else:
-                            harmonic_lines.append(line.replace("°",""))
+                            harmonic_lines.append(line)
 
-                    # Create Table
-                    columns = [
-                        'Harmonic Number',
-                        'Frequency [Hz]',
-                        'Fourier Component',
-                        'Normalized Component',
-                        'Phase [degree]',
-                        'Normalized Phase [degree]'
-                    ]
-                    harmonics_df = pd.DataFrame([r.split('\t') for r in harmonic_lines], columns=columns)
-                    # Convert to numeric
-                    harmonics_df = harmonics_df.apply(pd.to_numeric, errors='ignore')
+                    # Parse the harmonic lines
+                    harmonics = [FourierHarmonic.from_lt_spice(h_line) for h_line in harmonic_lines]
 
-                    # Find Fundamental Frequency
-                    frequency = harmonics_df['Frequency [Hz]'][0]
+                    # Create value for results dictionary (The fourier analysis results)
+                    fourier_analysis = FourierAnalysis(dc_component, thd, thd_alt, harmonics)
+                    # Create key for results dictionary (The inputs to the fourier command)
+                    fourier_key = FourierKey(waveform, fourier_analysis.frequency, fourier_analysis.n_harmonics,
+                                             n_periods)
 
-                    # Save data related to this fourier analysis in a dictionary
-                    data_dict = {
-                        'dc': dc_component,
-                        'thd': thd,
-                        'harmonics': harmonics_df
-                    }
-
-                    # Find the dictionary that stores fourier data or create it if it does not exist
-                    fourier_dict: dict = self.dataset.get('fourier', None)
-                    if fourier_dict is None:
-                        self.dataset['fourier'] = {}
-                        fourier_dict = self.dataset['fourier']
-
-                    # Find the dict that stores data for this frequency or create it if it does not exist
-                    frequency_dict: dict = fourier_dict.get(frequency, None)
-                    if frequency_dict is None:
-                        fourier_dict[frequency] = {}
-                        frequency_dict = fourier_dict[frequency]
-
-                    # Find the dict that stores data for this number of periods or create it if it does not exist
-                    period_dict: dict = frequency_dict.get(n_periods, None)
-                    if period_dict is None:
-                        frequency_dict[n_periods] = {}
-                        period_dict = frequency_dict[n_periods]
-
-                    # Find the list that stores data for this waveform or create it if it does not exist
-                    waveform_list: list = period_dict.get(waveform, None)
-                    if waveform_list is None:
-                        period_dict[waveform] = []
-                        waveform_list = period_dict[waveform]
-
-                    # Add the data to the list
-                    waveform_list.append(data_dict)
+                    self.fourier[-1][fourier_key] = fourier_analysis
 
                 if line.startswith(".step"):
                     # message(line)
@@ -426,6 +448,10 @@ class LTSpiceLogReader(object):
                             ll.append(rhs)
                         else:
                             self.stepset[lhs] = [rhs]
+
+                    # Add a new fourier result if we have fourier analysis
+                    if self.fourier:
+                        self.fourier.append(FourierResults())
 
                 elif line.startswith("Measurement:"):
                     if not read_measures:

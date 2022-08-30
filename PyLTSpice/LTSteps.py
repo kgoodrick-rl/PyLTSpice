@@ -83,7 +83,7 @@ import math
 import re
 import os
 import sys
-from collections import OrderedDict, UserDict
+from collections import OrderedDict, UserDict, UserList
 from typing import Union, Iterable, List
 from PyLTSpice.detect_encoding import detect_encoding
 from dataclasses import dataclass
@@ -254,20 +254,49 @@ class FourierHarmonic:
         return cls(harmonic, frequency, fourier_component, normalized_component, phase, normalized_phase)
 
 
+class HarmonicsList(UserList):
+    def __getitem__(self, item):
+        if item == 0:
+            raise IndexError('You cannot use index 0 on a HarmonicsList')
+        if item > 0:
+            item -= 1
+        return super().__getitem__(item)
+
+    def __iter__(self):
+        i = 1
+        try:
+            while True:
+                v = self[i]
+                yield v
+                i += 1
+        except IndexError:
+            return
+
+    def __reversed__(self):
+        for i in reversed(range(1, len(self)+1)):
+            yield self[i]
+
+    def index(self, value, start=1, stop=None):
+        return super(UserList, self).index(value, start, stop)
+
+
 @dataclass
 class FourierAnalysis:
     dc_component: float
     thd: float
     thd_alt: float
-    harmonics: List[FourierHarmonic]
+    harmonics: HarmonicsList[FourierHarmonic]
 
     @property
     def frequency(self):
-        return self.harmonics[0].frequency
+        return self.harmonics[1].frequency
 
     @property
     def n_harmonics(self):
         return len(self.harmonics)
+
+    def __getitem__(self, item):
+        return self.harmonics[item]
 
 
 class FourierResults(UserDict):
@@ -424,7 +453,7 @@ class LTSpiceLogReader(object):
                             harmonic_lines.append(line)
 
                     # Parse the harmonic lines
-                    harmonics = [FourierHarmonic.from_lt_spice(h_line) for h_line in harmonic_lines]
+                    harmonics = HarmonicsList([FourierHarmonic.from_lt_spice(h_line) for h_line in harmonic_lines])
 
                     # Create value for results dictionary (The fourier analysis results)
                     fourier_analysis = FourierAnalysis(dc_component, thd, thd_alt, harmonics)

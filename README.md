@@ -228,6 +228,24 @@ A more detailed documentation is directly included in the source file docstrings
 * Alternative contact : nuno.brum@gmail.com
 
 ## History ##
+* Version 2.3\
+Supporting the creation of RAW Noise Analysis\
+Bug Fixes (See GitHub Log) 
+
+* Version 2.2\
+Making numpy as an requirement and eliminating all code that avoided the use of numpy\
+Using new packaging tool\
+Fixes on the LTSpice_RawWrite\
+Fixes in the handling of stepped operating point simulations 
+
+* Version 2.1\
+Adopting minimum python version 3.7\
+Starting to use unit tests to validate all modules and improving testbenches\
+Compatibility with NGSpice\
+Avoiding the use of setup.py as per PEP517 and PEP518\
+Bug Fixes (See GitHub log for more information)\
+Improvements on the management of stepped data in the LTSpice_RawRead.py
+
 * Version 2.0.2\
 Improvements on Encoding detection
 

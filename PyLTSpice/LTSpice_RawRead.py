@@ -79,27 +79,27 @@ Here is an example:
 
 .. code-block:: text
 
-	0	time	time
-	1	V(n001)	voltage
-	2	V(n004)	voltage
-	3	V(n003)	voltage
-	4	V(n006)	voltage
-	5	V(display_current_adc)	voltage
-	6	V(n002)	voltage
-	7	V(3v3_m)	voltage
-	8	V(n005)	voltage
-	9	V(n007)	voltage
-	10	V(24v_dsp)	voltage
-	11	I(C3)	device_current
-	12	I(C2)	device_current
-	13	I(C1)	device_current
-	14	I(I1)	device_current
-	15	I(R4)	device_current
-	16	I(R3)	device_current
-	17	I(V2)	device_current
-	18	I(V1)	device_current
-	19	Ix(u1:+)	subckt_current
-	20	Ix(u1:-)	subckt_current
+    0	time	time
+    1	V(n001)	   voltage
+    2	V(n004)	   voltage
+    3	V(n003)	   voltage
+    4	V(n006)	   voltage
+    5	V(adcc)    voltage
+    6	V(n002)	   voltage
+    7	V(3v3_m)   voltage
+    8	V(n005)	   voltage
+    9	V(n007)	   voltage
+    10	V(24v_dsp) voltage
+    11	I(C3)	   device_current
+    12	I(C2)	   device_current
+    13	I(C1)	   device_current
+    14	I(I1)	   device_current
+    15	I(R4)	   device_current
+    16	I(R3)	   device_current
+    17	I(V2)	   device_current
+    18	I(V1)	   device_current
+    19	Ix(u1:+)   subckt_current
+    20	Ix(u1:-)   subckt_current
 
 Binary Section
 --------------
@@ -108,8 +108,16 @@ representation. In this case this section is replaced with a "Values" section.
 LTSpice stores data directly onto the disk during simulation, writing per each time or frequency step the list of
 values, as exemplified below for a .TRAN simulation.
 
-     <timestamp 0><trace 1><trace 2><trace 3><trace 4>.....<trace N><timestamp 1><trace 1><trace2 >...
+     <timestamp 0><trace1 0><trace2 0><trace3 0>...<traceN 0>
 
+     <timestamp 1><trace1 1><trace2 1><trace3 1>...<traceN 1>
+
+     <timestamp 2><trace1 2><trace2 2><trace3 2>...<traceN 2>
+
+     ...
+
+     <timestamp T><trace1 T><trace2 T><trace3 T>...<traceN T>
+     
 Depending on the type of simulation the type of data changes.
 On TRAN simulations the timestamp is always stored as 8 bytes float (double) and trace values as a 4 bytes (single).
 On AC simulations the data is stored in complex format, which includes a real part and an imaginary part, each with 8
@@ -120,10 +128,20 @@ the integer part.
 Fast Access
 -----------
 
-Once a simulation is done, the user can ask LTSpice to optimize the data structure in such that he variables are stored
+Once a simulation is done, the user can ask LTSpice to optimize the data structure in such that variables are stored
 contiguously as illustrated below.
 
-     <timestamp 0><trace 1><trace 2><trace 3><trace 4>.....<trace N><timestamp 1><trace 1><trace2 >...
+     <timestamp 0><timestamp 1>...<timestamp T>
+
+     <trace1 0><trace1 1>...<trace1 T>
+
+     <trace2 0><trace2 1>...<trace2 T>
+
+     <trace3 0><trace3 1>...<trace3 T>
+
+     ...
+
+     <traceN T><traceN T>...<tranceN T>
 
 This can speed up the data reading. Note that this transformation is not done automatically. Transforming data to Fast
 Access must be requested by the user. If the transformation is done, it is registered in the Flags: line in the
@@ -144,8 +162,8 @@ Follows an example of the LTSpiceRawRead class usage. Information on the LTSpice
 Examples
 ========
 
-The example below demonstrates the usage of the LTSpiceRawRead class. It reads a .RAW file and uses the matplotlib library
-to plot the results of three traces in two subplots. ::
+The example below demonstrates the usage of the LTSpiceRawRead class. It reads a .RAW file and uses the matplotlib
+library to plot the results of three traces in two subplots. ::
 
     import matplotlib.pyplot as plt  # Imports the matplotlib library for plotting the results
 
@@ -188,15 +206,11 @@ from binascii import b2a_hex
 from collections import OrderedDict
 from struct import unpack
 from typing import Union, List, Tuple
+from pathlib import Path
 from PyLTSpice.detect_encoding import detect_encoding
 
-try:
-    from numpy import zeros, array, complex128, abs as np_abs, float32, float64, frombuffer, angle
-except ImportError:
-    USE_NNUMPY = False
-else:
-    USE_NNUMPY = True
-    print("Found Numpy. Will be used for storing data")
+import numpy as np
+from numpy import zeros, complex128, float32, float64, frombuffer, angle
 
 
 def read_float64(f):
@@ -318,17 +332,14 @@ class DataSet(object):
         self.name = name
         self.whattype = whattype
         self.numerical_type = numerical_type
-        if USE_NNUMPY:
-            if whattype == 'time':
-                self.data = zeros(datalen, dtype=float64)
-            elif numerical_type == 'real':
-                self.data = zeros(datalen, dtype=float32)
-            elif numerical_type == 'complex':
-                self.data = zeros(datalen, dtype=complex128)
-            else:
-                raise NotImplementedError
+        if numerical_type == 'double':
+            self.data = zeros(datalen, dtype=float64)
+        elif numerical_type == 'real':
+            self.data = zeros(datalen, dtype=float32)
+        elif numerical_type == 'complex':
+            self.data = zeros(datalen, dtype=complex128)
         else:
-            self.data = [None for _ in range(datalen)]
+            raise NotImplementedError
 
     def __str__(self):
         if isinstance(self.data[0], float):
@@ -340,21 +351,8 @@ class DataSet(object):
             data = [b2a_hex(value) for value in self.data]
             return "name:'%s'\ntype:'%s'\nlen:%d\n%s" % (self.name, self.whattype, len(self.data), str(data))
 
-    def __getitem__(self, item):
-        return self.data.__getitem__(item)
-
     def __len__(self):
         return len(self.data)
-
-    def get_point(self, n):
-        """
-        Get a point from the dataset
-        :param n: position on the vector
-        :type n:int
-        :returns: Value of the data point
-        :rtype: float or complex
-        """
-        return self.data[n]
 
     def get_wave(self):
         """
@@ -362,13 +360,6 @@ class DataSet(object):
         :rtype: list or numpy.array
         """
         return self.data
-
-    def get_len(self) -> int:
-        """
-        :return: The number of data points
-        :rtype: int
-        """
-        return len(self.data)
 
 
 class Axis(DataSet):
@@ -379,9 +370,11 @@ class Axis(DataSet):
 
     To access data inside this class, the get_wave() should be used, which implements the support for the STEPed data.
     IF Numpy is available, get_wave() will return a numpy array.
+
+    In Transient Analysis and in DC transfer characteristic, LTSpice uses doubles to store the axis values.
     """
 
-    def __init__(self, name: str, whattype: str, datalen: int, numerical_type: str ='real'):
+    def __init__(self, name: str, whattype: str, datalen: int, numerical_type: str = 'double'):
         super().__init__(name, whattype, datalen, numerical_type)
         self.step_info = None
 
@@ -397,8 +390,6 @@ class Axis(DataSet):
         while i < len(self.data):
             if self.data[i] == self.data[0]:
                 # print(k, i, self.data[i], self.data[i+1])
-                if self.data[i] == self.data[i + 1]:
-                    i += 1  # Needs to add one here because the data will be repeated
                 self.step_offsets[k] = i
                 k += 1
             i += 1
@@ -428,7 +419,7 @@ class Axis(DataSet):
             else:
                 return self.step_offsets[step]
 
-    def get_wave(self, step: int =0):
+    def get_wave(self, step: int = 0):
         """
         Returns an the vector containing the wave values. If numpy is installed, data is returned as a numpy array.
         If not, the wave is returned as a list of floats.
@@ -460,14 +451,70 @@ class Axis(DataSet):
         :return: time axis
         :rtype: list[float] or numpy.array
         """
-        if USE_NNUMPY:
-            return np_abs(self.get_wave(step))
+        assert self.name == 'time', \
+            "This function is only applicable to transient analysis, where a bug exists on the time signal"
+        return np.abs(self.get_wave(step))
+
+    def get_point(self, n, step: int = 0):
+        """
+        Get a point from the dataset
+        :param n: position on the vector
+        :type n:int
+        :param step: step index
+        :type step: int
+        :returns: Value of the data point
+        :rtype: float or complex
+        """
+        return self.data[n + self.step_offset(step)]
+
+    def __getitem__(self, item):
+        """This is only here for compatibility with previous code. """
+        assert self.step_info is None, "Indexing should not be used with stepped data. Use get_point"
+        return self.data.__getitem__(item)
+
+    def get_position(self, t, step: int = 0) -> Union[int, float]:
+        """
+        Returns the position of a point in the axis. If the point doesn't exist, an interpolation is done between the
+        two closest points.
+        For example, if the point requested is 1.0001ms and the closest points that exist in the axis are t[100]=1ms and
+        t[101]=1.001ms, then the return value will be 100 + (1.0001ms-1ms)/(1.001ms-1ms) = 100.1
+
+        :param t: point in axis to search for
+        :type t: float
+        :param step: step number
+        :type step: int
+        :returns: The position of parameter /t/ in the axis
+        :rtype: int, float
+        """
+        if self.name == 'time':
+            timex = self.get_time_axis(step)
         else:
-            shallow_copy = self.get_wave(step).copy()
-            for i in range(len(shallow_copy)):
-                if shallow_copy[i] < 0:
-                    shallow_copy[i] = -shallow_copy[i]
-            return shallow_copy
+            timex = self.get_wave(step)
+        for i, x in enumerate(timex):
+            if x == t:
+                return i
+            elif x > t:
+                # Needs to interpolate the data
+                if i == 0:
+                    raise IndexError("Time position is lower than t0")
+                frac = (t - timex[i-1])/(timex[i] - timex[i-1])
+                return i - 1 + frac
+
+    def get_len(self, step: int = 0) -> int:
+        """
+        Returns the length of the axis.
+        :param step: Optional parameter the step index.
+        :type step: int
+        :return: The number of data points
+        :rtype: int
+        """
+        return self.step_offset(step + 1) - self.step_offset(step)
+
+    def __len__(self):
+        if self.step_info is None:
+            return len(self.data)
+        else:
+            return self.get_len()
 
 
 class Trace(DataSet):
@@ -484,7 +531,7 @@ class Trace(DataSet):
 
     def get_point(self, n: int, step: int = 0):
         """
-        Implementation of the [] operator. Do not use this method directly.
+        Implementation of the [] operator.
 
         :param n: item in the array
         :type n: int
@@ -494,14 +541,23 @@ class Trace(DataSet):
         :rtype: float
         """
         if self.axis is None:
-            return super().get_point(n)
+            if n != 0:
+                return self.data[n]
+            else:
+                return self.data[step]  # This is for the case of stepped operation point simulation.
         else:
             return self.data[self.axis.step_offset(step) + n]
 
-    def get_wave(self, step=0):
+    def __getitem__(self, item):
+        """This is only here for compatibility with previous code. """
+        assert self.axis is None or self.axis.step_info is None, \
+            "Indexing should not be used with stepped data. Use get_point() method"
+        return self.data.__getitem__(item)
+
+    def get_wave(self, step: int = 0):
         """
         Returns the data contained in this object. For stepped simulations an argument must be passed specifying the
-        the step number. If no steps exist, the argument must be left blank.
+        step number. If no steps exist, the argument must be left blank.
         To know whether stepped data exist, the user can use the get_raw_property('Flags') method.
 
         If numpy is available the get_wave() method will return a numpy array.
@@ -521,12 +577,46 @@ class Trace(DataSet):
             else:
                 return self.data[self.axis.step_offset(step):self.axis.step_offset(step + 1)]
 
+    def get_point_at(self, t, step: int = 0):
+        """
+        Get a point from the trace at the point specified by the /t/ argument.
+        If the point doesn't exist on the axis, the data is interpolated using a linear regression between the two
+        adjacent points.
+        :param t: point in the axis where to find the point.
+        :type t: float, float32(numpy) or float64(numpy)
+        :param step: step index
+        :type step: int
+        """
+        pos = self.axis.get_position(t, step)
+        if isinstance(pos, (float, float32, float64)):
+            offset = self.axis.step_offset(step)
+            i = int(pos)
+            last_item = self.get_len(step) - 1
+            if i < last_item:
+                f = pos - i
+                return self.data[offset + i] + f * (self.data[offset + i + 1] - self.data[offset + i])
+            elif pos == last_item:  # This covers the case where a float is given containing the last position
+                return self.data[offset + i]
+            else:
+                raise IndexError(f"The highest index is {last_item}. Received {pos}")
+        else:
+            return self.get_point(pos, step)
 
-class Op(Trace):
-    """Class used for storing operation points."""
+    def get_len(self, step: int = 0) -> int:
+        """
+        Returns the length of the axis.
+        :param step: Optional parameter the step index.
+        :type step: int
+        :return: The number of data points
+        :rtype: int
+        """
+        return self.axis.step_offset(step + 1)
 
-    def __init__(self, name, whattype):
-        super().__init__(name, whattype, 1, None, 'real')
+    def __len__(self):
+        """This is only here for compatibility with previous code. """
+        assert self.axis is None or self.axis.step_info is None, \
+            "len() should not be used with stepped data. Use get_len() method passing the step index"
+        return len(self.data)
 
 
 class DummyTrace(object):
@@ -548,7 +638,7 @@ class LTSpiceRawRead(object):
     it will also try to read the corresponding LOG file so to retrieve the stepped data.
 
     :param raw_filename: The file containing the RAW data to be read
-    :type raw_filename: str
+    :type raw_filename: str | pahtlib.Path
     :param traces_to_read:
         A string or a list containing the list of traces to be read. If None is provided, only the header is read and
         all trace data is discarded. If a '*' wildcard is given or no parameter at all then all traces are read.
@@ -556,7 +646,7 @@ class LTSpiceRawRead(object):
     :key headeronly:
         Used to only load the header information and skip the trace data entirely. Use `headeronly=True`.
     """
-    header_lines = [
+    header_lines = (
         "Title",
         "Date",
         "Plotname",
@@ -568,11 +658,20 @@ class LTSpiceRawRead(object):
         "Command",
         "Variables",
         "Backannotation"
-    ]
+    )
+
+    ACCEPTED_PLOTNAMES = (
+        'AC Analysis',
+        'DC transfer characteristic',
+        'Operating Point',
+        'Transient Analysis',
+        'Transfer Function',
+        'Noise Spectral Density',
+    )
 
     def __init__(self, raw_filename: str, traces_to_read: Union[str, List[str], Tuple[str], None] = '*', **kwargs):
         self.verbose = kwargs.get('verbose', True)
-        assert isinstance(raw_filename, str), "RAW filename is expected to be a string"
+        raw_filename = Path(raw_filename)
         if traces_to_read is not None:
             assert isinstance(traces_to_read, (str, list, tuple)), "traces_to_read must be a string, a list or None"
 
@@ -588,20 +687,24 @@ class LTSpiceRawRead(object):
             self.encoding = 'utf_16_le'
             sz_enc = 2
             line = 'Tit'
+        else:
+            raise RuntimeError("Unrecognized encoding")
         if self.verbose:
             print("Reading file with encoding ", self.encoding)
         # Storing the filename as part of the dictionary
-        self.raw_params = OrderedDict(Filename=raw_filename)  # Initializing the dictionary that contains all raw file info
+        self.raw_params = OrderedDict(Filename=raw_filename)  # Initializing the dict that contains all raw file info
         self.backannotations = []  # Storing backannotations
         header = []
+        binary_start = 6
+        line = ""
         while True:
             ch = raw_file.read(sz_enc).decode(encoding=self.encoding)
+            binary_start += sz_enc
             if ch == '\n':
                 if self.encoding == 'utf_8':  # must remove the \r
                     line = line.rstrip('\r')
                 header.append(line)
                 if line in ('Binary:', 'Values:'):
-                    self.binary_start = raw_file.tell()
                     self.raw_type = line
                     break
                 line = ""
@@ -611,14 +714,17 @@ class LTSpiceRawRead(object):
             k, _, v = line.partition(':')
             if k == 'Variables':
                 break
-            self.raw_params[k] = v
+            self.raw_params[k] = v.strip()
         self.nPoints = int(self.raw_params['No. Points'], 10)
         self.nVariables = int(self.raw_params['No. Variables'], 10)
+
+        has_axis = self.raw_params['Plotname'] not in ('Operating Point', 'Transfer Function',)
+
         self._traces = []
         self.steps = None
         self.axis = None  # Creating the axis
         self.flags = self.raw_params['Flags'].split()
-        if 'complex' in self.raw_params['Flags']:
+        if 'complex' in self.raw_params['Flags'] or self.raw_params['Plotname'] == 'AC Analysis':
             numerical_type = 'complex'
         else:
             numerical_type = 'real'
@@ -626,18 +732,22 @@ class LTSpiceRawRead(object):
         ivar = 0
         for line in header[i + 1:-1]:  # Parse the variable names
             _, name, var_type = line.lstrip().split('\t')
-            if 'forward' in self.flags and ivar == 0:  # If it has an axis, it should be always read
-                self.axis = Axis(name, var_type, self.nPoints, numerical_type)
+            if has_axis and ivar == 0:  # If it has an axis, it should be always read
+                if numerical_type == 'real':
+                    axis_numerical_type = 'double'
+                else:
+                    axis_numerical_type = numerical_type
+                self.axis = Axis(name, var_type, self.nPoints, axis_numerical_type)
                 trace = self.axis
             elif (traces_to_read == "*") or (name in traces_to_read):
-                # TODO: Add wildcards to the waveform matching
-                if 'forward' in self.flags:  # Reads data
+                if has_axis:  # Reads data
                     trace = Trace(name, var_type, self.nPoints, self.axis, numerical_type)
                 else:
-                    # If an Operation Point or Transfer Function, only one point per trace
-                    trace = Op(name, var_type)
+                    # If an Operation Point or Transfer Function, only one point per step
+                    trace = Trace(name, var_type, self.nPoints, None, 'real')
             else:
                 trace = DummyTrace(name, var_type)
+
             self._traces.append(trace)
             ivar += 1
 
@@ -656,7 +766,7 @@ class LTSpiceRawRead(object):
         if self.raw_type == "Binary:":
             # Will start the reading of binary values
             # But first check whether how data is stored.
-            self.block_size = (raw_file_size - self.binary_start) // self.nPoints
+            self.block_size = (raw_file_size - binary_start) // self.nPoints
             self.data_size = self.block_size // self.nVariables
 
             scan_functions = []
@@ -684,29 +794,25 @@ class LTSpiceRawRead(object):
             if "fastaccess" in self.raw_params["Flags"]:
                 if self.verbose:
                     print("Binary RAW file with Fast access")
-                # A fast access means that the traces are grouped together.
+                # Fast access means that the traces are grouped together.
                 for i, var in enumerate(self._traces):
                     if isinstance(var, DummyTrace):
                         # TODO: replace this by a seek
                         raw_file.read(self.nPoints * self.data_size)
                     else:
-                        if USE_NNUMPY:
-                            if self.data_size == 8:
+                        if self.data_size == 8:
+                            s = raw_file.read(self.nPoints * 8)
+                            var.data = frombuffer(s, dtype=float64)
+                        elif self.data_size == 16:
+                            s = raw_file.read(self.nPoints * 16)
+                            var.data = frombuffer(s, dtype=complex)
+                        else:
+                            if i == 0:
                                 s = raw_file.read(self.nPoints * 8)
                                 var.data = frombuffer(s, dtype=float64)
-                            elif self.data_size == 16:
-                                s = raw_file.read(self.nPoints * 16)
-                                var.data = frombuffer(s, dtype=complex)
                             else:
-                                if i == 0:
-                                    s = raw_file.read(self.nPoints * 8)
-                                    var.data = frombuffer(s, dtype=float64)
-                                else:
-                                    s = raw_file.read(self.nPoints * 4)
-                                    var.data = frombuffer(s, dtype=float32)
-                        else:
-                            for point in range(self.nPoints):
-                                var.data[point] = scan_functions[i](raw_file)
+                                s = raw_file.read(self.nPoints * 4)
+                                var.data = frombuffer(s, dtype=float32)
 
             else:
                 if self.verbose:
@@ -736,7 +842,7 @@ class LTSpiceRawRead(object):
                         value = line[len(spoint):-1]
                     else:
                         value = line[:-1]
-                    if not isinstance(trace, DummyTrace):
+                    if not isinstance(var, DummyTrace):
                         var.data[point] = float(value)
         else:
             raw_file.close()
@@ -760,18 +866,22 @@ class LTSpiceRawRead(object):
         if "stepped" in self.raw_params["Flags"]:
             try:
                 self._load_step_information(raw_filename)
-            except Exception:
+            except LTSPiceReadException:
                 print("LOG file not found or problems happened while reading it. Auto-detecting steps")
-                number_of_steps = 0
-                for v in self.axis:
-                    if v == self.axis[0]:
-                        number_of_steps += 1
+                if has_axis:
+                    number_of_steps = 0
+                    for v in self.axis:
+                        if v == self.axis[0]:
+                            number_of_steps += 1
+                else:
+                    number_of_steps = self.nPoints
                 self.steps = [{'run': i+1} for i in range(number_of_steps)]
 
             if self.steps is not None:
-                # Individual access to the Trace Classes, this information is stored in the Axis
-                # which is always in position 0
-                self._traces[0]._set_steps(self.steps)
+                if has_axis:
+                    # Individual access to the Trace Classes, this information is stored in the Axis
+                    # which is always in position 0
+                    self._traces[0]._set_steps(self.steps)
 
     def get_raw_property(self, property_name=None):
         """
@@ -819,7 +929,7 @@ class LTSpiceRawRead(object):
         else:
             return self._traces[trace_ref]
 
-    def get_time_axis(self, step=0):
+    def get_time_axis(self, step: int = 0):
         """
         *(Deprecated)* Use get_axis method instead
 
@@ -838,17 +948,30 @@ class LTSpiceRawRead(object):
         :returns: Array with the X axis
         :rtype: list[float] or numpy.array
         """
-        axis = self.get_trace(0)
-        if axis.whattype == 'time':
-            return axis.get_time_axis(step)
+        if self.axis:
+            axis = self.get_trace(0)
+            if axis.whattype == 'time':
+                return axis.get_time_axis(step)
+            else:
+                return axis.get_wave(step)
         else:
-            return axis.get_wave(step)
+            raise RuntimeError("This RAW file does not have an axis.")
 
-    def _load_step_information(self, filename):
+    def get_len(self, step: int = 0) -> int:
+        """
+        Returns the length of the data at the give step index.
+        :param step: Optional parameter the step index.
+        :type step: int
+        :return: The number of data points
+        :rtype: int
+        """
+        return self.axis.get_len(step) 
+
+    def _load_step_information(self, filename: Path):
         # Find the extension of the file
-        if not filename.endswith(".raw"):
+        if not filename.suffix == ".raw":
             raise LTSPiceReadException("Invalid Filename. The file should end with '.raw'")
-        logfile = filename[:-3] + 'log'
+        logfile = filename.with_suffix(".log")
         try:
             encoding = detect_encoding(logfile, "Circuit:")
             log = open(logfile, 'r', errors='replace', encoding=encoding)
@@ -867,7 +990,7 @@ class LTSpiceRawRead(object):
                         value = float(value)
                     except:
                         pass
-                        # Leave value as a string to accomodate cases as temperature steps
+                        # Leave value as a string to accommodate cases like temperature steps.
                         # Temperature steps have the form '.step temp=25°C'
                     step_dict[key] = value
                 if self.steps is None:
@@ -881,11 +1004,8 @@ class LTSpiceRawRead(object):
         return self.get_trace(item)
 
     def get_steps(self, **kwargs):
-        """
-        Returns the steps that correspond to the query set in the **kwargs parameters.
-        Example:
-
-        ::
+        """Returns the steps that correspond to the query set in the * * kwargs parameters.
+        Example: ::
 
             raw_read.get_steps(V5=1.2, TEMP=25)
 
@@ -894,9 +1014,8 @@ class LTSpiceRawRead(object):
         Note: the correspondence between step numbers and .STEP information is stored on the .log file.
 
         :key kwargs:
-
-            key-value arguments in which the key correspond to a stepped parameter or source name, and the value is the
-            stepped value.
+         key-value arguments in which the key correspond to a stepped parameter or source name, and the value is the
+         stepped value.
 
         :return: The steps that match the query
         :rtype: list[int]
@@ -934,7 +1053,7 @@ if __name__ == "__main__":
     from numpy import abs as mag
 
     def what_to_units(whattype):
-        "Determines the unit to display on the plot Y axis"
+        """Determines the unit to display on the plot Y axis"""
         if 'voltage' in whattype:
             return 'V'
         if 'current' in whattype:
@@ -950,7 +1069,16 @@ if __name__ == "__main__":
     else:
         test_directory = pathjoin(pathsplit(directory)[0], 'tests')
         filename = 'DC sweep.raw'
-        trace_names = ('V(in)', 'V(out)')
+        # filename = 'tran.raw'
+        # filename = 'tran - step.raw'
+        # filename = 'ac.raw'
+        # filename = 'AC - STEP.raw'
+        # filename = 'PI_Filter_tf.raw'
+        # filename = 'DC op point - STEP_1.raw'
+        # filename = 'Noise.raw'
+        filename = "test2_gs_000.raw"
+        trace_names = ("run", "V(out)", "V(err)")
+        # trace_names = '*' # 'V(out)',
         raw_filename = pathjoin(test_directory, filename)
 
     LTR = RawRead(raw_filename, trace_names, verbose=True)
@@ -958,11 +1086,16 @@ if __name__ == "__main__":
         print("{}: {}{}".format(param, " "*(20-len(param)), str(value).strip()))
 
     if trace_names == '*':
-        print("Add the traces to plot after the raw file")
-        exit(0)
+        print("Reading all the traces in the raw file")
+        trace_names = LTR.get_trace_names()
+
     traces = [LTR.get_trace(trace) for trace in trace_names]
-    steps = LTR.get_steps()
-    print("Steps read are :", list(steps))
+    if LTR.axis is not None:
+        steps_data = LTR.get_steps()
+    else:
+        steps_data = [0]
+    print("Steps read are :", list(steps_data))
+
     if 'complex' in LTR.flags:
         n_axis = len(traces) * 2
     else:
@@ -984,9 +1117,12 @@ if __name__ == "__main__":
             ax.grid(True)
             if 'log' in LTR.flags:
                 ax.set_xscale('log')
-            for step in steps:
-                x = LTR.get_axis(step)
-                y = traces[i].get_wave(step)
+            for step_i in steps_data:
+                if LTR.axis:
+                    x = LTR.get_axis(step_i)
+                else:
+                    x = np.arange(LTR.nPoints)
+                y = traces[i].get_wave(step_i)
                 if 'complex' in LTR.flags:
                     x = mag(x)
                     if magnitude:
@@ -995,7 +1131,7 @@ if __name__ == "__main__":
                     else:
                         y = angle(y, deg=True)
                 if write_labels:
-                    ax.plot(x, y, label=str(steps[step]))
+                    ax.plot(x, y, label=str(steps_data[step_i]))
                 else:
                     ax.plot(x, y)
             write_labels = False

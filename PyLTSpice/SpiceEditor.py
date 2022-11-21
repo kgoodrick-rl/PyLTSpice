@@ -80,7 +80,7 @@ REPLACE_REGXES = {
     'M': r"^(?P<designator>M§?\w+)(?P<nodes>(\s+\S+){3,4})\s+(?P<value>\w+).*$",  # MOSFET TODO: Parameters substitution not supported
     'O': r"^(?P<designator>O§?\w+)(?P<nodes>(\s+\S+){4})\s+(?P<value>\w+).*$",  # Lossy Transmission Line TODO: Parameters substitution not supported
     'Q': r"^(?P<designator>Q§?\w+)(?P<nodes>(\s+\S+){3,4})\s+(?P<value>\w+).*$",  # Bipolar TODO: Parameters substitution not supported
-    'R': r"^(?P<designator>R§?\w+)(?P<nodes>(\s+\S+){2})(?P<model>\s+\w+)?\s+(?P<value>({)?(?(6).*}|([0-9\.E+-]+(Meg|[kmuµnpf])?R?))).*$", # Resistors
+    'R': r"^(?P<designator>R§?\w+)(?P<nodes>(\s+\S+){2})(?P<model>\s+\w+)?\s+(?P<value>({)?(?(6).*}|([0-9\.E+-]+(Meg|[kmuµnpf])?R?)\d*)).*$", # Resistors
     'S': r"^(?P<designator>S§?\w+)(?P<nodes>(\s+\S+){4})\s+(?P<value>.*)$",  # Voltage Controlled Switch
     'T': r"^(?P<designator>T§?\w+)(?P<nodes>(\s+\S+){4})\s+(?P<value>.*)$",  # Lossless Transmission
     'U': r"^(?P<designator>U§?\w+)(?P<nodes>(\s+\S+){3})\s+(?P<value>.*)$",  # Uniform RC-line
@@ -93,7 +93,7 @@ REPLACE_REGXES = {
 }
 
 
-PARAM_REGEX = r"%s((\s*=\s*)|\s+)(?P<value>[\w*/\.+-/\*{}()]*)"
+PARAM_REGEX = r"(?<= )%s((\s*=\s*))(?P<value>[\w\*\/\.\+\-\/\*\{\}\(\)\t ]*)(?<!\s)($|\s+)(?!\s*=)"
 SUBCKT_CLAUSE_FIND = r"^.SUBCKT\s+"
 
 # Code Optimization objects, avoiding repeated compilation of regular expressions
@@ -671,12 +671,12 @@ class SpiceCircuit(object):
         """
         return scan_eng(self.get_component_info(element)['value'])
 
-    def get_component_nodes(self, elemment: str) -> List[str]:
+    def get_component_nodes(self, element: str) -> List[str]:
         """
         Returns the nodes to which the component is attached to.
 
-        :param elemment: Reference of the circuit element to get the nodes.
-        :type elemment: str
+        :param element: Reference of the circuit element to get the nodes.
+        :type element: str
         :return: List of nodes
         :rtype: list
         """
@@ -872,7 +872,7 @@ class SpiceEditor(SpiceCircuit):
         if instruction not in self.netlist:
             # Insert before backanno instruction
             try:
-                line = self.netlist.index('.backanno')
+                line = self.netlist.index('.backanno\n')  # TODO: Improve this. END of line termination could be differnt and case as well
             except ValueError:
                 line = len(self.netlist) - 2  # This is where typically the .backanno instruction is
             self.netlist.insert(line, instruction)
@@ -940,7 +940,8 @@ class SpiceEditor(SpiceCircuit):
 
         :returns: Nothing
         """
-        self.netlist = []
+        self.netlist.clear()
+        self.modified_subcircuits.clear()
         if os.path.exists(self.netlist_file):
             with open(self.netlist_file, 'r', encoding=self.encoding, errors='replace') as f:
                 lines = iter(f)  # Creates an iterator object to consume the file
